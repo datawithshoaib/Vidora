@@ -1,0 +1,2 @@
+# Vidora - AI Video Assistant
+
