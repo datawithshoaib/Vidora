@@ -56,6 +56,7 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         with self._lock:
+            self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.executescript(SCHEMA)
             self._conn.commit()
 
@@ -109,3 +110,30 @@ class Store:
     def get_analysis(self, analysis_id: str) -> dict | None:
         rows = self._execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,))
         return dict(rows[0]) if rows else None
+
+    def list_jobs(self) -> list[dict]:
+        """History entries (every job, newest first) with the analysis title if any."""
+        rows = self._execute(
+            "SELECT jobs.*, analyses.title AS title FROM jobs"
+            " LEFT JOIN analyses ON analyses.id = jobs.analysis_id"
+            " ORDER BY jobs.created_at DESC, jobs.rowid DESC"
+        )
+        return [dict(row) for row in rows]
+
+    def delete_job(self, job_id: str) -> None:
+        """Remove a job and its analysis (rows that reference it cascade)."""
+        with self._lock:
+            job = self._conn.execute(
+                "SELECT analysis_id FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            if job and job["analysis_id"]:
+                self._conn.execute("DELETE FROM analyses WHERE id = ?", (job["analysis_id"],))
+            self._conn.commit()
+
+    def delete_analysis(self, analysis_id: str) -> None:
+        """Remove an analysis together with the job that produced it."""
+        with self._lock:
+            self._conn.execute("DELETE FROM jobs WHERE analysis_id = ?", (analysis_id,))
+            self._conn.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,))
+            self._conn.commit()

@@ -65,7 +65,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
 
@@ -97,12 +97,38 @@ def create_app(
         runner.submit(lambda: pipeline.run(job_id))
         return job
 
+    @app.get("/jobs")
+    def list_jobs() -> list[dict]:
+        return store.list_jobs()
+
     @app.get("/jobs/{job_id}")
     def get_job(job_id: str) -> dict:
         job = store.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found.")
         return job
+
+    @app.delete("/jobs/{job_id}", status_code=204)
+    def delete_job(job_id: str) -> None:
+        job = store.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found.")
+        if job["status"] in ("queued", "processing"):
+            raise HTTPException(
+                status_code=409,
+                detail="This analysis is still in progress. Wait for it to finish, then delete it.",
+            )
+        store.delete_job(job_id)
+        shutil.rmtree(data_dir / "tmp" / job_id, ignore_errors=True)
+
+    @app.delete("/analyses/{analysis_id}", status_code=204)
+    def delete_analysis(analysis_id: str) -> None:
+        if store.get_analysis(analysis_id) is None:
+            raise HTTPException(status_code=404, detail="Analysis not found.")
+        for job in store.list_jobs():
+            if job["analysis_id"] == analysis_id:
+                shutil.rmtree(data_dir / "tmp" / job["id"], ignore_errors=True)
+        store.delete_analysis(analysis_id)
 
     @app.get("/analyses/{analysis_id}")
     def get_analysis(analysis_id: str) -> dict:
