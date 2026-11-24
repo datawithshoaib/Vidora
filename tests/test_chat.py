@@ -129,3 +129,30 @@ def test_long_transcripts_send_only_relevant_passages(env) -> None:
     context = env.answerer.calls[0]["context"]
     assert "budget was approved" in context
     assert len(context) < 20000  # transcript is about 100k characters
+
+
+def test_chat_on_a_failed_job_explains_it_failed(env) -> None:
+    env.fetcher.error = RuntimeError("boom")
+    job_id = env.submit().json()["id"]
+    env.runner.run_all()
+
+    response = ask(env.client, job_id, "Anything?")
+
+    assert response.status_code == 409
+    assert "failed" in response.json()["detail"].lower()
+
+
+def test_analysis_deleted_while_answering_returns_404_not_500(env) -> None:
+    analysis_id = completed_analysis(env)
+
+    def answer_after_delete(*args) -> str:
+        with sqlite3.connect(env.data_dir / "vidora.db") as db:
+            db.execute("PRAGMA foreign_keys = ON")
+            db.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,))
+        return "late answer"
+
+    env.answerer.answer = answer_after_delete
+
+    response = ask(env.client, analysis_id, "Still there?")
+
+    assert response.status_code == 404

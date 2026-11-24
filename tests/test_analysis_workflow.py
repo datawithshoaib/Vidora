@@ -161,3 +161,16 @@ def test_frontend_origin_may_post_jobs(env) -> None:
         },
     )
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_empty_transcript_fails_the_job_instead_of_saving_blank_notes(env) -> None:
+    env.transcriber.transcribe = lambda chunks: "   "
+    job_id = env.submit().json()["id"]
+    env.runner.run_all()
+
+    job = env.client.get(f"/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert "speech" in job["error"].lower()
+    assert job["analysis_id"] is None
+    assert env.analyzer.transcripts == []
+    assert env.tmp_entries() == []

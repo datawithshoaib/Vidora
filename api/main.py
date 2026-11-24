@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -157,7 +158,13 @@ def create_app(
         analysis = store.get_analysis(analysis_id)
         if analysis is not None:
             return analysis
-        if store.get_job(analysis_id) is not None:
+        job = store.get_job(analysis_id)
+        if job is not None and job["status"] == "failed":
+            raise HTTPException(
+                status_code=409,
+                detail="This analysis failed, so there is nothing to chat about.",
+            )
+        if job is not None:
             raise HTTPException(
                 status_code=409,
                 detail="This analysis is not finished yet. Chat opens when it completes.",
@@ -186,7 +193,10 @@ def create_app(
                 status_code=502,
                 detail=f"Could not get an answer: {str(exc) or type(exc).__name__}",
             )
-        return store.add_chat_message(analysis_id, question, answer)
+        try:
+            return store.add_chat_message(analysis_id, question, answer)
+        except sqlite3.IntegrityError:  # deleted while the model was answering
+            raise HTTPException(status_code=404, detail="Analysis not found.")
 
     return app
 

@@ -88,6 +88,10 @@ class Pipeline:
 
             self.store.update_job(job_id, step="transcribing")
             transcript = self.transcriber.transcribe(chunks)
+            if not transcript.strip():
+                raise RuntimeError(
+                    "No speech was found in this source, so there is nothing to analyze."
+                )
 
             self.store.update_job(job_id, step="analyzing")
             notes = self.analyzer.analyze(transcript)
