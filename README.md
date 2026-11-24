@@ -19,7 +19,21 @@ source -> audio_processor (download, convert to WAV, 10-minute chunks)
        -> vector_store + rag_engine (ChromaDB, sentence-transformers)
 ```
 
-## Run locally
+## Web app and API
+
+Requirements: Python 3.13, [uv](https://docs.astral.sh/uv/), Node.js 20.9 or newer with npm, and FFmpeg on your `PATH`.
+
+```bash
+uv sync
+npm --prefix frontend install
+python run.py
+```
+
+`python run.py` starts the FastAPI service (<http://127.0.0.1:8000/health>) and the Next.js web app (<http://localhost:3000>). If either service fails to start or stops, the command says which one and exits. The web app shows a service-unavailable notice when it cannot reach the API. Set `VIDORA_API_URL` to point the web app at a different API address.
+
+Run the backend tests with `uv run pytest` and the frontend checks with `npm --prefix frontend run lint`.
+
+## Run the Streamlit app and CLI
 
 Requirements: Python 3.13 and [FFmpeg](https://ffmpeg.org) on your `PATH`.
 
