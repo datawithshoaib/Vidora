@@ -1,12 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { type Analysis, type Job, checkUpload, getAnalysis, getJob, submitJob, uploadMedia, ACCEPT } from "@/lib/api";
+import { History } from "@/components/history";
+import {
+  type Analysis,
+  type HistoryItem,
+  type Job,
+  ACCEPT,
+  checkUpload,
+  deleteJob,
+  getAnalysis,
+  getJob,
+  listJobs,
+  submitJob,
+  uploadMedia,
+} from "@/lib/api";
 
 const STEPS = [
   { key: "downloading", label: "Downloading audio" },
@@ -136,6 +149,24 @@ export function Analyzer() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
 
+  const [history, setHistory] = useState<HistoryItem[] | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistory(await listJobs());
+      setHistoryError(null);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Could not load history.");
+    }
+  }, []);
+
+  useEffect(() => {
+    listJobs()
+      .then(setHistory)
+      .catch((error) => setHistoryError(error instanceof Error ? error.message : "Could not load history."));
+  }, []);
+
   const jobId = job?.id;
   const active = job?.status === "queued" || job?.status === "processing";
 
@@ -148,6 +179,7 @@ export function Analyzer() {
         if (cancelled) return;
         setPollError(null);
         setJob(next);
+        if (next.status !== "queued" && next.status !== "processing") void refreshHistory();
         if (next.status === "completed" && next.analysis_id) {
           setAnalysis(await getAnalysis(next.analysis_id));
         }
@@ -159,7 +191,7 @@ export function Analyzer() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [jobId, active]);
+  }, [jobId, active, refreshHistory]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -170,6 +202,7 @@ export function Analyzer() {
     setSubmitting(true);
     try {
       setJob(await submitJob(url.trim()));
+      void refreshHistory();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Could not start the analysis.");
     } finally {
@@ -190,6 +223,7 @@ export function Analyzer() {
     setUploadProgress(0);
     try {
       setJob(await uploadMedia(file, setUploadProgress));
+      void refreshHistory();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Could not upload the file.");
     } finally {
@@ -199,8 +233,44 @@ export function Analyzer() {
 
   const uploading = uploadProgress !== null;
 
+  async function onSelect(item: HistoryItem) {
+    setFormError(null);
+    setPollError(null);
+    setAnalysis(null);
+    setJob(item);
+    if (item.status === "completed" && item.analysis_id) {
+      try {
+        setAnalysis(await getAnalysis(item.analysis_id));
+      } catch (error) {
+        setFormError(error instanceof Error ? error.message : "Could not open the analysis.");
+      }
+    }
+  }
+
+  async function onDelete(item: HistoryItem) {
+    try {
+      await deleteJob(item.id);
+      if (item.id === jobId) {
+        setJob(null);
+        setAnalysis(null);
+      }
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not delete the analysis.");
+    }
+    void refreshHistory();
+  }
+
   return (
-    <div className="space-y-8">
+    <div className="grid gap-10 lg:grid-cols-[18rem_1fr]">
+      <History
+        items={history}
+        loading={history === null && !historyError}
+        error={historyError}
+        selectedId={jobId}
+        onSelect={(item) => void onSelect(item)}
+        onDelete={onDelete}
+      />
+      <div className="min-w-0 space-y-8">
       <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row" noValidate>
         <Input
           aria-label="YouTube URL"
@@ -240,6 +310,7 @@ export function Analyzer() {
       )}
       {job?.status === "completed" && !analysis && <p className="text-sm text-stone-500">Loading results...</p>}
       {analysis && <Result analysis={analysis} />}
+      </div>
     </div>
   );
 }

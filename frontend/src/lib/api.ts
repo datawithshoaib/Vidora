@@ -7,7 +7,10 @@ export type Job = {
   step: "downloading" | "preparing" | "transcribing" | "analyzing" | null;
   error: string | null;
   analysis_id: string | null;
+  created_at: string;
 };
+
+export type HistoryItem = Job & { source: string; title: string | null };
 
 export type Analysis = {
   id: string;
@@ -26,6 +29,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new Error("Cannot reach the Vidora API. Start it with python run.py.");
   }
+  if (response.status === 204) return undefined as T;
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(typeof body.detail === "string" ? body.detail : "Something went wrong. Try again.");
@@ -81,3 +85,5 @@ export function uploadMedia(file: File, onProgress: (fraction: number) => void):
 
 export const getJob = (id: string) => request<Job>(`/api/jobs/${id}`);
 export const getAnalysis = (id: string) => request<Analysis>(`/api/analyses/${id}`);
+export const listJobs = () => request<HistoryItem[]>("/api/jobs");
+export const deleteJob = (id: string) => request<void>(`/api/jobs/${id}`, { method: "DELETE" });
