@@ -7,6 +7,7 @@ Vidora turns a YouTube video or an uploaded audio/video file into something you 
 - **YouTube analysis:** submit a YouTube URL; audio is downloaded with `yt-dlp`.
 - **File uploads:** upload an audio or video file (MP3, WAV, M4A, MP4, MOV, WebM and more) up to 500 MB with the file picker or by dragging it onto the page. Uploads go through the same transcription and notes pipeline.
 - **Background jobs:** each submission is a fresh job with visible progress (queued, downloading, transcribing, analyzing, then completed or failed). Jobs and results are stored in SQLite and survive restarts.
+- **History:** a sidebar lists every analysis (including failed ones) with its status and date, newest first. Open a past one to read it again, or delete it (with confirmation) to remove its record, transcript, notes and any retained files. Deleting a job that is still queued or processing is refused until it finishes.
 - **English transcription:** local [Whisper](https://github.com/openai/whisper).
 - **Notes:** title, summary, action items, key decisions and open questions generated with Mistral (`mistral-small-latest`) through LangChain.
 - **Private by default:** downloaded audio and uploaded files live in a job-scoped temp folder and are deleted when the job finishes or fails, including rejected or partial uploads.
@@ -41,8 +42,11 @@ Requirements: Python 3.13, [uv](https://docs.astral.sh/uv/), Node.js 20.9 or new
 | --- | --- | --- |
 | `POST` | `/jobs` | Body `{"url": "<YouTube URL>"}`. Returns `202` with a queued job, or `422` for an invalid URL. |
 | `POST` | `/jobs/upload` | Multipart form with a `file` field. Returns `202` with a queued job, `415` for an unsupported type, or `413` when over the size limit. The file is streamed to disk, never held in memory. |
+| `GET` | `/jobs` | History: all jobs newest first, with `status`, `created_at`, `source`, and the analysis `title` when completed. |
 | `GET` | `/jobs/{id}` | Job `status` (`queued`, `processing`, `completed`, `failed`), current `step`, `error`, and `analysis_id` when done. |
 | `GET` | `/analyses/{id}` | Title, summary, action items, key decisions, open questions and transcript. |
+| `DELETE` | `/jobs/{id}` | Deletes the job, its analysis and retained artifacts. `204`; `404` if unknown; `409` while queued or processing. |
+| `DELETE` | `/analyses/{id}` | Deletes an analysis and the job that produced it. `204` or `404`. |
 | `GET` | `/health` | Service check. |
 
 ## Development
