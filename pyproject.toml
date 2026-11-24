@@ -3,8 +3,17 @@ name = "vidora"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "audioop-lts>=0.2.2",
     "fastapi>=0.165.0",
+    "langchain-core>=1.8.4",
+    "langchain-mistralai>=1.2.0",
+    "langchain-text-splitters>=1.2.0",
+    "openai-whisper>=20250625",
+    "pydub>=0.25.1",
+    "python-dotenv>=1.2.4",
+    "torch>=2.15.0",
     "uvicorn>=0.54.0",
+    "yt-dlp>=2026.11.23",
 ]
 
 [dependency-groups]

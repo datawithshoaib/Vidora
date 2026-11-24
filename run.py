@@ -29,7 +29,7 @@ def main() -> int:
         return 1
 
     services = [
-        ("API", ["uv", "run", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"], ROOT),
+        ("API", ["uv", "run", "uvicorn", "--factory", "api.main:create_app", "--host", "127.0.0.1", "--port", "8000"], ROOT),
         ("Web app", [shutil.which("npm") or "npm", "run", "dev", "--", "--hostname", "127.0.0.1"], FRONTEND),
     ]
     processes: list[tuple[str, subprocess.Popen]] = []
