@@ -87,3 +87,13 @@ export const getJob = (id: string) => request<Job>(`/api/jobs/${id}`);
 export const getAnalysis = (id: string) => request<Analysis>(`/api/analyses/${id}`);
 export const listJobs = () => request<HistoryItem[]>("/api/jobs");
 export const deleteJob = (id: string) => request<void>(`/api/jobs/${id}`, { method: "DELETE" });
+
+export type ChatTurn = { id: number; question: string; answer: string; created_at: string };
+
+export const getChat = (analysisId: string) => request<ChatTurn[]>(`/api/analyses/${analysisId}/chat`);
+export const askQuestion = (analysisId: string, question: string) =>
+  request<ChatTurn>(`/api/analyses/${analysisId}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });

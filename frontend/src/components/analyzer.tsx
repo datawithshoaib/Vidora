@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Chat } from "@/components/chat";
 import { History } from "@/components/history";
 import {
   type Analysis,
@@ -84,6 +85,7 @@ function Result({ analysis }: { analysis: Analysis }) {
         <Section title="Key decisions" body={analysis.key_decisions} />
         <Section title="Open questions" body={analysis.open_questions} />
       </div>
+      <Chat key={analysis.id} analysisId={analysis.id} />
       <Section title="Transcript" body={analysis.transcript} />
     </div>
   );
