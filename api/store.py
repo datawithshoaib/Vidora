@@ -1,0 +1,163 @@
+"""SQLite persistence for jobs and analyses.
+
+A job tracks the background work for one submitted source. A completed job
+points at an analysis, which holds the transcript and generated notes. Later
+features (uploads, history, deletion, chat) extend these tables.
+"""
+
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS analyses (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    action_items TEXT NOT NULL,
+    key_decisions TEXT NOT NULL,
+    open_questions TEXT NOT NULL,
+    transcript TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    source_kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    step TEXT,
+    error TEXT,
+    analysis_id TEXT REFERENCES analyses(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_id TEXT NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
+JOB_FIELDS = (
+    "id", "source_kind", "source", "status", "step", "error",
+    "analysis_id", "created_at", "updated_at",
+)
+ANALYSIS_FIELDS = (
+    "id", "title", "summary", "action_items", "key_decisions",
+    "open_questions", "transcript", "created_at",
+)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class Store:
+    def __init__(self, db_path: Path) -> None:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
+        with self._lock:
+            self._conn.execute("PRAGMA foreign_keys = ON")
+            self._conn.executescript(SCHEMA)
+            self._conn.commit()
+
+    def _execute(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+            self._conn.commit()
+        return rows
+
+    def create_job(self, source_kind: str, source: str, job_id: str | None = None) -> dict:
+        job_id, now = job_id or uuid.uuid4().hex, _now()
+        self._execute(
+            "INSERT INTO jobs (id, source_kind, source, status, created_at, updated_at)"
+            " VALUES (?, ?, ?, 'queued', ?, ?)",
+            (job_id, source_kind, source, now, now),
+        )
+        return self.get_job(job_id)
+
+    def get_job(self, job_id: str) -> dict | None:
+        rows = self._execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        return dict(rows[0]) if rows else None
+
+    def update_job(self, job_id: str, **fields: str | None) -> None:
+        assert set(fields) <= set(JOB_FIELDS)
+        fields["updated_at"] = _now()
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        self._execute(
+            f"UPDATE jobs SET {assignments} WHERE id = ?", (*fields.values(), job_id)
+        )
+
+    def fail_unfinished_jobs(self, reason: str) -> None:
+        self._execute(
+            "UPDATE jobs SET status = 'failed', step = NULL, error = ?, updated_at = ?"
+            " WHERE status IN ('queued', 'processing')",
+            (reason, _now()),
+        )
+
+    def create_analysis(self, **notes: str) -> dict:
+        analysis_id = uuid.uuid4().hex
+        self._execute(
+            "INSERT INTO analyses (id, title, summary, action_items, key_decisions,"
+            " open_questions, transcript, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                analysis_id, notes["title"], notes["summary"], notes["action_items"],
+                notes["key_decisions"], notes["open_questions"], notes["transcript"],
+                _now(),
+            ),
+        )
+        return self.get_analysis(analysis_id)
+
+    def get_analysis(self, analysis_id: str) -> dict | None:
+        rows = self._execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,))
+        return dict(rows[0]) if rows else None
+
+    def list_jobs(self) -> list[dict]:
+        """History entries (every job, newest first) with the analysis title if any."""
+        rows = self._execute(
+            "SELECT jobs.*, analyses.title AS title FROM jobs"
+            " LEFT JOIN analyses ON analyses.id = jobs.analysis_id"
+            " ORDER BY jobs.created_at DESC, jobs.rowid DESC"
+        )
+        return [dict(row) for row in rows]
+
+    def delete_job(self, job_id: str) -> None:
+        """Remove a job and its analysis (rows that reference it cascade)."""
+        with self._lock:
+            job = self._conn.execute(
+                "SELECT analysis_id FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            if job and job["analysis_id"]:
+                self._conn.execute("DELETE FROM analyses WHERE id = ?", (job["analysis_id"],))
+            self._conn.commit()
+
+    def delete_analysis(self, analysis_id: str) -> None:
+        """Remove an analysis together with the job that produced it."""
+        with self._lock:
+            self._conn.execute("DELETE FROM jobs WHERE analysis_id = ?", (analysis_id,))
+            self._conn.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,))
+            self._conn.commit()
+
+    def add_chat_message(self, analysis_id: str, question: str, answer: str) -> dict:
+        now = _now()
+        rows = self._execute(
+            "INSERT INTO chat_messages (analysis_id, question, answer, created_at)"
+            " VALUES (?, ?, ?, ?) RETURNING id, question, answer, created_at",
+            (analysis_id, question, answer, now),
+        )
+        return dict(rows[0])
+
+    def list_chat_messages(self, analysis_id: str) -> list[dict]:
+        rows = self._execute(
+            "SELECT id, question, answer, created_at FROM chat_messages"
+            " WHERE analysis_id = ? ORDER BY id",
+            (analysis_id,),
+        )
+        return [dict(row) for row in rows]
