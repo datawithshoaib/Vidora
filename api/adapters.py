@@ -32,14 +32,36 @@ class YoutubeFetcher:
             ydl.extract_info(url, download=True)
 
         wav_path = workdir / "source.wav"
-        audio = AudioSegment.from_wav(wav_path).set_channels(1).set_frame_rate(16000)
-        chunk_ms = CHUNK_MINUTES * 60 * 1000
-        chunks = []
-        for index, start in enumerate(range(0, len(audio), chunk_ms)):
-            chunk_path = workdir / f"chunk_{index}.wav"
-            audio[start : start + chunk_ms].export(chunk_path, format="wav")
-            chunks.append(chunk_path)
+        chunks = _split_audio(AudioSegment.from_wav(wav_path), workdir)
         wav_path.unlink(missing_ok=True)
+        return chunks
+
+
+def _split_audio(audio, workdir: Path) -> list[Path]:
+    audio = audio.set_channels(1).set_frame_rate(16000)
+    chunk_ms = CHUNK_MINUTES * 60 * 1000
+    chunks = []
+    for index, start in enumerate(range(0, len(audio), chunk_ms)):
+        chunk_path = workdir / f"chunk_{index}.wav"
+        audio[start : start + chunk_ms].export(chunk_path, format="wav")
+        chunks.append(chunk_path)
+    return chunks
+
+
+class FfmpegPreparer:
+    """Decode an uploaded audio/video file with FFmpeg and split it into WAV chunks."""
+
+    def prepare(self, path: Path, workdir: Path) -> list[Path]:
+        from pydub import AudioSegment
+
+        try:
+            audio = AudioSegment.from_file(path)
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not read audio from this file. It may be corrupt or have no audio track."
+            ) from exc
+        chunks = _split_audio(audio, workdir)
+        path.unlink(missing_ok=True)
         return chunks
 
 

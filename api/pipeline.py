@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from api.store import Store
+from api.uploads import upload_path
 
 logger = logging.getLogger("vidora.pipeline")
 
@@ -27,6 +28,11 @@ class Notes:
 class MediaFetcher(Protocol):
     def fetch(self, url: str, workdir: Path) -> list[Path]:
         """Download the source and return audio chunk files inside workdir."""
+
+
+class UploadPreparer(Protocol):
+    def prepare(self, path: Path, workdir: Path) -> list[Path]:
+        """Convert an uploaded audio/video file into audio chunk files inside workdir."""
 
 
 class Transcriber(Protocol):
@@ -52,7 +58,9 @@ class Pipeline:
         fetcher: MediaFetcher,
         transcriber: Transcriber,
         analyzer: Analyzer,
+        preparer: UploadPreparer,
     ) -> None:
+        self.preparer = preparer
         self.store = store
         self.tmp_root = tmp_root
         self.fetcher = fetcher
@@ -66,8 +74,12 @@ class Pipeline:
             job = self.store.get_job(job_id)
             workdir.mkdir(parents=True, exist_ok=True)
 
-            self.store.update_job(job_id, status="processing", step="downloading")
-            chunks = self.fetcher.fetch(job["source"], workdir)
+            if job["source_kind"] == "upload":
+                self.store.update_job(job_id, status="processing", step="preparing")
+                chunks = self.preparer.prepare(upload_path(workdir, job["source"]), workdir)
+            else:
+                self.store.update_job(job_id, status="processing", step="downloading")
+                chunks = self.fetcher.fetch(job["source"], workdir)
 
             self.store.update_job(job_id, step="transcribing")
             transcript = self.transcriber.transcribe(chunks)

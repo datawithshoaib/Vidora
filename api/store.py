@@ -65,8 +65,8 @@ class Store:
             self._conn.commit()
         return rows
 
-    def create_job(self, source_kind: str, source: str) -> dict:
-        job_id, now = uuid.uuid4().hex, _now()
+    def create_job(self, source_kind: str, source: str, job_id: str | None = None) -> dict:
+        job_id, now = job_id or uuid.uuid4().hex, _now()
         self._execute(
             "INSERT INTO jobs (id, source_kind, source, status, created_at, updated_at)"
             " VALUES (?, ?, ?, 'queued', ?, ?)",

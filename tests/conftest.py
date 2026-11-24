@@ -40,6 +40,24 @@ class FakeFetcher:
         return [chunk]
 
 
+class FakePreparer:
+    def __init__(self) -> None:
+        self.paths: list[Path] = []
+        self.contents: list[bytes] = []
+        self.workdirs: list[Path] = []
+        self.error: Exception | None = None
+
+    def prepare(self, path: Path, workdir: Path) -> list[Path]:
+        self.paths.append(path)
+        self.workdirs.append(workdir)
+        self.contents.append(path.read_bytes())
+        chunk = workdir / "chunk_0.wav"
+        chunk.write_bytes(b"audio")
+        if self.error:
+            raise self.error
+        return [chunk]
+
+
 class FakeTranscriber:
     def __init__(self) -> None:
         self.calls: list[list[Path]] = []
@@ -71,10 +89,11 @@ class FakeAnalyzer:
 
 
 class Env:
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, max_upload_bytes: int = 1024) -> None:
         self.data_dir = tmp_path / "data"
         self.runner = ManualRunner()
         self.fetcher = FakeFetcher()
+        self.preparer = FakePreparer()
         self.transcriber = FakeTranscriber()
         self.analyzer = FakeAnalyzer()
         self.app = create_app(
@@ -83,11 +102,23 @@ class Env:
             transcriber=self.transcriber,
             analyzer=self.analyzer,
             runner=self.runner,
+            preparer=self.preparer,
+            max_upload_bytes=max_upload_bytes,
         )
         self.client = TestClient(self.app)
 
     def submit(self, url: str = "https://www.youtube.com/watch?v=abc123XYZ_-"):
         return self.client.post("/jobs", json={"url": url})
+
+    def upload(self, content: bytes = b"media-bytes", filename: str = "talk.mp3",
+               content_type: str = "audio/mpeg"):
+        return self.client.post(
+            "/jobs/upload", files={"file": (filename, content, content_type)}
+        )
+
+    def tmp_entries(self) -> list[Path]:
+        tmp = self.data_dir / "tmp"
+        return list(tmp.iterdir()) if tmp.exists() else []
 
     def restart(self) -> TestClient:
         """A new app instance over the same data directory."""

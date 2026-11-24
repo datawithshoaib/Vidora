@@ -1,16 +1,19 @@
 import os
+import shutil
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from api.adapters import MistralAnalyzer, WhisperTranscriber, YoutubeFetcher
-from api.pipeline import Analyzer, MediaFetcher, Pipeline, Runner, Transcriber
+from api.adapters import FfmpegPreparer, MistralAnalyzer, WhisperTranscriber, YoutubeFetcher
+from api.pipeline import Analyzer, MediaFetcher, Pipeline, Runner, Transcriber, UploadPreparer
 from api.sources import INVALID_URL_MESSAGE, is_youtube_video_url
 from api.store import Store
+from api.uploads import DEFAULT_MAX_UPLOAD_MB, UploadError, receive_upload
 
 DEFAULT_DATA_DIR = Path("data")
 
@@ -35,17 +38,25 @@ def create_app(
     transcriber: Transcriber | None = None,
     analyzer: Analyzer | None = None,
     runner: Runner | None = None,
+    preparer: UploadPreparer | None = None,
+    max_upload_bytes: int | None = None,
 ) -> FastAPI:
     load_dotenv()
     data_dir = Path(data_dir or os.getenv("VIDORA_DATA_DIR") or DEFAULT_DATA_DIR)
     store = Store(data_dir / "vidora.db")
     store.fail_unfinished_jobs("Job was interrupted because the service restarted.")
+    shutil.rmtree(data_dir / "tmp", ignore_errors=True)  # leftovers from a crash
+    if max_upload_bytes is None:
+        max_upload_bytes = int(
+            float(os.getenv("VIDORA_MAX_UPLOAD_MB") or DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024
+        )
     pipeline = Pipeline(
         store=store,
         tmp_root=data_dir / "tmp",
         fetcher=fetcher or YoutubeFetcher(),
         transcriber=transcriber or WhisperTranscriber(),
         analyzer=analyzer or MistralAnalyzer(),
+        preparer=preparer or FfmpegPreparer(),
     )
     runner = runner or ThreadRunner()
 
@@ -68,6 +79,22 @@ def create_app(
             raise HTTPException(status_code=422, detail=INVALID_URL_MESSAGE)
         job = store.create_job("youtube", request.url.strip())
         runner.submit(lambda: pipeline.run(job["id"]))
+        return job
+
+    @app.post("/jobs/upload", status_code=202)
+    async def upload_job(request: Request) -> dict:
+        job_id = uuid.uuid4().hex
+        workdir = data_dir / "tmp" / job_id
+        try:
+            filename = await receive_upload(request, workdir, max_upload_bytes)
+        except UploadError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+        try:
+            job = store.create_job("upload", filename, job_id=job_id)
+        except Exception:
+            shutil.rmtree(workdir, ignore_errors=True)
+            raise
+        runner.submit(lambda: pipeline.run(job_id))
         return job
 
     @app.get("/jobs/{job_id}")
