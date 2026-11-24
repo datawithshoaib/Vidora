@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_id TEXT NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 JOB_FIELDS = (
@@ -137,3 +144,20 @@ class Store:
             self._conn.execute("DELETE FROM jobs WHERE analysis_id = ?", (analysis_id,))
             self._conn.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,))
             self._conn.commit()
+
+    def add_chat_message(self, analysis_id: str, question: str, answer: str) -> dict:
+        now = _now()
+        rows = self._execute(
+            "INSERT INTO chat_messages (analysis_id, question, answer, created_at)"
+            " VALUES (?, ?, ?, ?) RETURNING id, question, answer, created_at",
+            (analysis_id, question, answer, now),
+        )
+        return dict(rows[0])
+
+    def list_chat_messages(self, analysis_id: str) -> list[dict]:
+        rows = self._execute(
+            "SELECT id, question, answer, created_at FROM chat_messages"
+            " WHERE analysis_id = ? ORDER BY id",
+            (analysis_id,),
+        )
+        return [dict(row) for row in rows]

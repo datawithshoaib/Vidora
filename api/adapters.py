@@ -155,3 +155,24 @@ class MistralAnalyzer:
                 transcript,
             ),
         )
+
+
+ANSWER_SYSTEM = (
+    "You are an expert assistant answering questions about a video. Answer ONLY from the "
+    "transcript excerpts below. If the answer is not in them, say: 'I could not find this "
+    "information in the transcript.' Be concise and precise. If quoting someone, say so.\n\n"
+    "Transcript excerpts:\n{context}"
+)
+
+
+class MistralAnswerer(MistralAnalyzer):
+    """Answers questions about a transcript with Mistral, using earlier turns for follow-ups."""
+
+    def answer(self, context: str, history: list[tuple[str, str]], question: str) -> str:
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        messages = [SystemMessage(ANSWER_SYSTEM.replace("{context}", context))]
+        for asked, answered in history:
+            messages += [HumanMessage(asked), AIMessage(answered)]
+        messages.append(HumanMessage(question))
+        return str(self._llm(0.3).invoke(messages).content).strip()

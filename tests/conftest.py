@@ -88,6 +88,18 @@ class FakeAnalyzer:
         )
 
 
+class FakeAnswerer:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.error: Exception | None = None
+
+    def answer(self, context: str, history: list[tuple[str, str]], question: str) -> str:
+        self.calls.append({"context": context, "history": list(history), "question": question})
+        if self.error:
+            raise self.error
+        return f"Answer to: {question}"
+
+
 class Env:
     def __init__(self, tmp_path: Path, max_upload_bytes: int = 1024) -> None:
         self.data_dir = tmp_path / "data"
@@ -96,11 +108,13 @@ class Env:
         self.preparer = FakePreparer()
         self.transcriber = FakeTranscriber()
         self.analyzer = FakeAnalyzer()
+        self.answerer = FakeAnswerer()
         self.app = create_app(
             data_dir=self.data_dir,
             fetcher=self.fetcher,
             transcriber=self.transcriber,
             analyzer=self.analyzer,
+            answerer=self.answerer,
             runner=self.runner,
             preparer=self.preparer,
             max_upload_bytes=max_upload_bytes,
@@ -122,7 +136,9 @@ class Env:
 
     def restart(self) -> TestClient:
         """A new app instance over the same data directory."""
-        return TestClient(create_app(data_dir=self.data_dir, runner=self.runner))
+        return TestClient(
+            create_app(data_dir=self.data_dir, runner=self.runner, answerer=self.answerer)
+        )
 
 
 @pytest.fixture

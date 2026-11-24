@@ -45,6 +45,11 @@ class Analyzer(Protocol):
         """Generate title, summary and extracted lists from a transcript."""
 
 
+class Answerer(Protocol):
+    def answer(self, context: str, history: list[tuple[str, str]], question: str) -> str:
+        """Answer a question from transcript context and earlier (question, answer) turns."""
+
+
 class Runner(Protocol):
     def submit(self, fn) -> None:
         """Run fn in the background."""

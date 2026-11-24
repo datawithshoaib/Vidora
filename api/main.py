@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import uuid
@@ -9,17 +10,30 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from api.adapters import FfmpegPreparer, MistralAnalyzer, WhisperTranscriber, YoutubeFetcher
-from api.pipeline import Analyzer, MediaFetcher, Pipeline, Runner, Transcriber, UploadPreparer
+from api.adapters import (
+    FfmpegPreparer,
+    MistralAnalyzer,
+    MistralAnswerer,
+    WhisperTranscriber,
+    YoutubeFetcher,
+)
+from api.pipeline import Analyzer, Answerer, MediaFetcher, Pipeline, Runner, Transcriber, UploadPreparer
+from api.retrieval import select_context
 from api.sources import INVALID_URL_MESSAGE, is_youtube_video_url
 from api.store import Store
 from api.uploads import DEFAULT_MAX_UPLOAD_MB, UploadError, receive_upload
+
+logger = logging.getLogger("vidora.api")
 
 DEFAULT_DATA_DIR = Path("data")
 
 
 class JobRequest(BaseModel):
     url: str
+
+
+class ChatRequest(BaseModel):
+    question: str
 
 
 class ThreadRunner:
@@ -37,6 +51,7 @@ def create_app(
     fetcher: MediaFetcher | None = None,
     transcriber: Transcriber | None = None,
     analyzer: Analyzer | None = None,
+    answerer: Answerer | None = None,
     runner: Runner | None = None,
     preparer: UploadPreparer | None = None,
     max_upload_bytes: int | None = None,
@@ -58,6 +73,7 @@ def create_app(
         analyzer=analyzer or MistralAnalyzer(),
         preparer=preparer or FfmpegPreparer(),
     )
+    answerer = answerer or MistralAnswerer()
     runner = runner or ThreadRunner()
 
     app = FastAPI(title="Vidora API", version="0.1.0")
@@ -136,6 +152,41 @@ def create_app(
         if analysis is None:
             raise HTTPException(status_code=404, detail="Analysis not found.")
         return analysis
+
+    def chat_analysis(analysis_id: str) -> dict:
+        analysis = store.get_analysis(analysis_id)
+        if analysis is not None:
+            return analysis
+        if store.get_job(analysis_id) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="This analysis is not finished yet. Chat opens when it completes.",
+            )
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+
+    @app.get("/analyses/{analysis_id}/chat")
+    def get_chat(analysis_id: str) -> list[dict]:
+        chat_analysis(analysis_id)
+        return store.list_chat_messages(analysis_id)
+
+    @app.post("/analyses/{analysis_id}/chat")
+    def ask_question(analysis_id: str, request: ChatRequest) -> dict:
+        analysis = chat_analysis(analysis_id)
+        question = request.question.strip()
+        if not question:
+            raise HTTPException(status_code=422, detail="Enter a question.")
+        history = [(m["question"], m["answer"]) for m in store.list_chat_messages(analysis_id)]
+        try:
+            answer = answerer.answer(
+                select_context(analysis["transcript"], question), history, question
+            )
+        except Exception as exc:
+            logger.exception("Chat answer failed for analysis %s", analysis_id)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not get an answer: {str(exc) or type(exc).__name__}",
+            )
+        return store.add_chat_message(analysis_id, question, answer)
 
     return app
 
