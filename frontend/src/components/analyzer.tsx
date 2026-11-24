@@ -178,13 +178,14 @@ export function Analyzer() {
     const timer = window.setInterval(async () => {
       try {
         const next = await getJob(jobId);
+        // Load results before leaving the active state, so a failed fetch retries on the next poll.
+        const result =
+          next.status === "completed" && next.analysis_id ? await getAnalysis(next.analysis_id) : null;
         if (cancelled) return;
         setPollError(null);
+        if (result) setAnalysis(result);
         setJob(next);
         if (next.status !== "queued" && next.status !== "processing") void refreshHistory();
-        if (next.status === "completed" && next.analysis_id) {
-          setAnalysis(await getAnalysis(next.analysis_id));
-        }
       } catch (error) {
         if (!cancelled) setPollError(error instanceof Error ? error.message : "Lost contact with the API.");
       }
